@@ -23,7 +23,7 @@ boto3==1.16.16
 six==1.15.0
 tqdm==4.51.0
 Deprecated==1.2.10
-wrapt==1.12.1
+wrapt==1.13.2
 jsonfield==3.1.0
 
 # Django Apps
