@@ -17,7 +17,7 @@ decorator==5.1.0
 celery==5.1.2
 kombu==5.1.0
 vine==5.0.0
-tqdm==4.62.3
+tqdm==4.63.0
 Deprecated==1.2.13
 wrapt==1.13.2
 jsonschema==4.1.0
