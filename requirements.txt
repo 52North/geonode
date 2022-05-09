@@ -111,7 +111,7 @@ boto3==1.18.62
 python-memcached<=1.59
 
 # Contribs
-xmltodict<0.12.1
+xmltodict<0.13.1
 inflection>=0.4.0
 jdcal==1.4.1
 mock<5.0.0
