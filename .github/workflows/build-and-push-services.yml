@@ -1,0 +1,12 @@
+name: Build and push Images
+on:
+  push:
+    branches:
+      - "52n-istg"
+
+jobs:
+  hello:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Say Hello IStG
+        run: echo "Hello IStG GeoNode!"
