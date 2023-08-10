@@ -45,6 +45,7 @@ jobs:
             "org.opencontainers.image.title=${{ env.TITLE }}"
             "org.opencontainers.image.licenses=${{ env.LICENSE }}"
           tags: |
+            4.1
             latest
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
