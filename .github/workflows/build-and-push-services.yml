@@ -20,8 +20,11 @@ on:
   #     - "istg-v*.*.*"
 
 jobs:
-  build_images:
+  build_and_push_geonode:
     runs-on: ubuntu-22.04
+    env:
+      IMAGE: 52north/istg_geonode
+      VERSION: "4.1"
     steps:
       -
         name: Checkout
@@ -37,7 +40,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v4
         with:
-          images: 52north/istg_geonode
+          images: ${{ env.IMAGE }}
           labels: |
             "org.opencontainers.image.authors=${{ env.AUTHORS }}"
             "org.opencontainers.image.vendor=${{ env.VENDOR }}"
@@ -45,11 +48,10 @@ jobs:
             "org.opencontainers.image.title=${{ env.TITLE }}"
             "org.opencontainers.image.licenses=${{ env.LICENSE }}"
           tags: |
-            4.1
             latest
+            ${{ env.VERSION }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-          # type=match,pattern=v(.*),group=1,value=${{ github.event.inputs.tags }}
       -
         name: Login to Docker Hub
         uses: docker/login-action@v2
@@ -65,14 +67,105 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=52north/istg_geonode:buildcache
-          cache-to: type=registry,ref=52north/istg_geonode:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
-      # - name: Build and push
-      #   uses: docker/build-push-action@v4
-      #   with:
-      #     context: .
-      #     push: true
-      #     tags: 52north/geonode_istg:latest
-      #     cache-from: type=registry,ref=52north/geonode_istg:buildcache
-      #     cache-to: type=registry,ref=52north/geonode_istg:buildcache,mode=max
+  build_and_push_nginx:
+    runs-on: ubuntu-22.04
+    env:
+      IMAGE: 52north/istg_nginx
+      VERSION: "4.1"
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v3
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - 
+        name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.IMAGE }}
+          labels: |
+            "org.opencontainers.image.authors=${{ env.AUTHORS }}"
+            "org.opencontainers.image.vendor=${{ env.VENDOR }}"
+            "org.opencontainers.image.description=${{ env.DESCRIPTION }}"
+            "org.opencontainers.image.title=${{ env.TITLE }}"
+            "org.opencontainers.image.licenses=${{ env.LICENSE }}"
+          tags: |
+            latest
+            ${{ env.VERSION }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      -
+        name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN_ISTG }}
+      -
+        name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./scripts/docker/nginx/
+          file: ./scripts/docker/nginx/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+  build_and_push_geoserver:
+    runs-on: ubuntu-22.04
+    env:
+      IMAGE: 52north/istg_geoserver
+      VERSION: "2.23.0"
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v3
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - 
+        name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: "${{ env.IMAGE }}"
+          labels: |
+            "org.opencontainers.image.authors=${{ env.AUTHORS }}"
+            "org.opencontainers.image.vendor=${{ env.VENDOR }}"
+            "org.opencontainers.image.description=${{ env.DESCRIPTION }}"
+            "org.opencontainers.image.title=${{ env.TITLE }}"
+            "org.opencontainers.image.licenses=${{ env.LICENSE }}"
+          tags: |
+            latest
+            ${{ env.VERSION }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      -
+        name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN_ISTG }}
+      -
+        name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./scripts/docker/nginx/
+          file: ./scripts/docker/nginx/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
