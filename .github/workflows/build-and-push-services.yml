@@ -162,8 +162,8 @@ jobs:
         name: Build and push
         uses: docker/build-push-action@v4
         with:
-          context: ./scripts/docker/nginx/
-          file: ./scripts/docker/nginx/Dockerfile
+          context: ./scripts/docker/geoserver/
+          file: ./scripts/docker/geoserver/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
