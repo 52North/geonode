@@ -24,7 +24,9 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       IMAGE: 52north/istg_geonode
-      VERSION: "4.1"
+      MAJOR_VERSION: "4"
+      MINOR_VERSION: "4.1"
+      BUGFIX_VERSION: "4.1.1"
     steps:
       -
         name: Checkout
@@ -49,7 +51,9 @@ jobs:
             "org.opencontainers.image.licenses=${{ env.LICENSE }}"
           tags: |
             latest
-            ${{ env.VERSION }}
+            ${{ env.MAJOR_VERSION }}
+            ${{ env.MINOR_VERSION }}
+            ${{ env.BUGFIX_VERSION }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       -
@@ -74,7 +78,9 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       IMAGE: 52north/istg_nginx
-      VERSION: "4.1"
+      MAJOR_VERSION: "4"
+      MINOR_VERSION: "4.1"
+      BUGFIX_VERSION: "4.1.1"
     steps:
       -
         name: Checkout
@@ -99,7 +105,9 @@ jobs:
             "org.opencontainers.image.licenses=${{ env.LICENSE }}"
           tags: |
             latest
-            ${{ env.VERSION }}
+            ${{ env.MAJOR_VERSION }}
+            ${{ env.MINOR_VERSION }}
+            ${{ env.BUGFIX_VERSION }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       -
