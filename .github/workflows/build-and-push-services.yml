@@ -1,23 +1,23 @@
-name: Release Docker Images
+name: Release GeoNode Docker Images
 
 env:
   SHA: ${{ github.sha }}
-  TITLE: "52°North GeoNode Deployment Image for IStG"
+  TITLE: "52°North GeoNode Docker Image"
   VENDOR: "52°North GmbH"
   AUTHORS: "https://52North.org/"
-  DESCRIPTION: "52°North GeoNode Deployment Image"
+  DESCRIPTION: "Builds and publishes the Docker images GeoNode, GeoServer, Nginx"
   LICENSE: "GPL-3.0"
 
 on:
   push:
     branches:
-      - "52n-istg"
+      - "52n-master"
 
 jobs:
   build_and_push_geonode:
     runs-on: ubuntu-22.04
     env:
-      IMAGE: 52north/istg_geonode
+      IMAGE: 52north/geonode-geonode
       MAJOR_VERSION: "4"
       MINOR_VERSION: "4.1"
       BUGFIX_VERSION: "4.1.2"
@@ -54,7 +54,7 @@ jobs:
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN_ISTG }}
+          password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
       -
         name: Build and push
         uses: docker/build-push-action@v4
@@ -70,7 +70,7 @@ jobs:
   build_and_push_nginx:
     runs-on: ubuntu-22.04
     env:
-      IMAGE: 52north/istg_nginx
+      IMAGE: 52north/geonode-nginx
       MAJOR_VERSION: "4"
       MINOR_VERSION: "4.1"
       BUGFIX_VERSION: "4.1.2"
@@ -107,7 +107,7 @@ jobs:
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN_ISTG }}
+          password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
       -
         name: Build and push
         uses: docker/build-push-action@v4
@@ -123,7 +123,7 @@ jobs:
   build_and_push_geoserver:
     runs-on: ubuntu-22.04
     env:
-      IMAGE: 52north/istg_geoserver
+      IMAGE: 52north/geonode-geoserver
       VERSION: "2.23.0"
     steps:
       -
@@ -156,7 +156,7 @@ jobs:
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN_ISTG }}
+          password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
       -
         name: Build and push
         uses: docker/build-push-action@v4
