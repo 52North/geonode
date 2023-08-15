@@ -17,7 +17,7 @@ jobs:
   build_and_push_geonode:
     runs-on: ubuntu-22.04
     env:
-      IMAGE: 52north/geonode-geonode
+      IMAGE: 52north/geonode
       MAJOR_VERSION: "4"
       MINOR_VERSION: "4.1"
       BUGFIX_VERSION: "4.1.2"
