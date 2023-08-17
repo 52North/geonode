@@ -18,5 +18,6 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
         repository: peterevans/dockerhub-description
-        short-description: ${{ github.event.repository.description }}
+        short-description: "Geospatial content management system"
+        readme-filepath: ./README_52n.md
         enable-url-completion: true
