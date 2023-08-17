@@ -17,7 +17,7 @@ jobs:
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
-        repository: peterevans/dockerhub-description
+        repository: 52north/geonode
         short-description: "Geospatial content management system"
         readme-filepath: ./README_52n.md
         enable-url-completion: true
