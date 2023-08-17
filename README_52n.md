@@ -8,6 +8,7 @@ However, we are interested to stay as close to upstream as possible, to benefit 
 Starting from version `4` this image is built from the `52n-master` branch of the [`52north/geonode` repository](https://github.com/52North/geonode/tree/52n-master).
 Depending on our current project contexts we merge regularly from upstream, and create new pull requests from this fork.
 
-> :warning: **Note on `3`**
+> **Note on version `3` tags**
 >
-> Images containing a `3.x` version tag do have different code base.
+> Images containing a `3.x` version tag were experimental and do have a different code base.
+> These image are considered to be removed in the near future.
