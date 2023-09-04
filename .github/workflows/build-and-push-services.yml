@@ -1,7 +1,6 @@
 name: Release GeoNode Docker Images
 
 env:
-  SHA: ${{ github.sha }}
   TITLE: "52°North GeoNode Docker Image"
   VENDOR: "52°North GmbH"
   AUTHORS: "https://52North.org/"
@@ -45,7 +44,6 @@ jobs:
             "org.opencontainers.image.licenses=${{ env.LICENSE }}"
           tags: |
             latest
-            ${{ env.SHA }}
             ${{ env.MAJOR_VERSION }}
             ${{ env.MINOR_VERSION }}
             ${{ env.BUGFIX_VERSION }}
@@ -98,7 +96,6 @@ jobs:
             "org.opencontainers.image.licenses=${{ env.LICENSE }}"
           tags: |
             latest
-            ${{ env.SHA }}
             ${{ env.MAJOR_VERSION }}
             ${{ env.MINOR_VERSION }}
             ${{ env.BUGFIX_VERSION }}
@@ -149,7 +146,6 @@ jobs:
             "org.opencontainers.image.licenses=${{ env.LICENSE }}"
           tags: |
             latest
-            ${{ env.SHA }}
             ${{ env.VERSION }}
       -
         name: Login to Docker Hub
