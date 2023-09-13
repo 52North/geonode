@@ -3,7 +3,7 @@ name: Builds GeoNode Docker Images 4.1.x
 concurrency: 
   group: "geonode_build_4.1.x"
   cancel-in-progress: true
-  
+
 env:
   TITLE: "52°North GeoNode Docker Image"
   VENDOR: "52°North GmbH"
@@ -16,6 +16,8 @@ on:
   push:
     branches:
       - "52n-master"
+    paths: 
+      - "!.github/workflow/*-release.yaml"
 
 jobs:
   build_and_push_geonode:
