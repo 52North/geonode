@@ -59,7 +59,7 @@ jobs:
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
       -
         name: Fail in case fully tagged version already exists
         run: docker manifest inspect ${{ env.IMAGE }}:${{ steps.meta.env.MAJOR_MINOR_PATCH_VERSION }} > /dev/null ; test $? != 0
