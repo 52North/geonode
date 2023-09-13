@@ -14,7 +14,7 @@ env:
 on:
   push:
     tags: 
-      - "v*-52n"
+      - "*-52n"
 
 jobs:
   build_and_push_geonode:
