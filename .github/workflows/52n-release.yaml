@@ -1,5 +1,9 @@
 name: Release GeoNode Docker Images
 
+concurrency: 
+  group: "geonode_build_release"
+  cancel-in-progress: true
+
 env:
   TITLE: "52°North GeoNode Docker Image"
   VENDOR: "52°North GmbH"
