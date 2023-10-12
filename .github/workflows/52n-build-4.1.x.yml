@@ -16,9 +16,6 @@ on:
   push:
     branches:
       - "52n-4.1.x"
-    paths:
-      - "!./.github/workflows"
-      - "./.github/workflows/52n-build-4.1.x.yml"
 
 jobs:
   build_and_push_geonode:
