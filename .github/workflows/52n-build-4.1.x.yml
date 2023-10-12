@@ -16,8 +16,6 @@ on:
   push:
     branches:
       - "52n-master"
-    paths:
-      - "!.github/workflow/*-release.yaml"
 
 jobs:
   build_and_push_geonode:
