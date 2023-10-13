@@ -1,4 +1,4 @@
-name: Builds GeoNode Docker Images master/latest
+name: "[52n_master -> lastest] Builds GeoNode Docker Images"
 
 concurrency:
   group: "geonode_build_master"
