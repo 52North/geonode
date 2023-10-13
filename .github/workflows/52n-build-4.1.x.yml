@@ -1,4 +1,4 @@
-name: Builds GeoNode Docker Images 4.1.x
+name: "[52n-4.1.x -> 4.1.x] Builds GeoNode Docker Images"
 
 concurrency: 
   group: "geonode_build_4.1.x"
