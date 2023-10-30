@@ -1,15 +1,10 @@
-name: "[52n_master -> lastest] Builds GeoNode Docker Images"
+name: "[52n-master -> latest] Builds GeoNode Docker Images"
 
 concurrency:
   group: "geonode_build_master"
   cancel-in-progress: true
 
 env:
-  TITLE: "52°North GeoNode Docker Image"
-  VENDOR: "52°North GmbH"
-  AUTHORS: "https://52North.org/"
-  DESCRIPTION: "Builds and publishes the Docker images GeoNode, GeoServer, Nginx"
-  LICENSE: "GPL-3.0"
   TAG: latest
 
 on:
@@ -20,114 +15,57 @@ on:
 jobs:
   build_and_push_geonode:
     runs-on: ubuntu-22.04
-    env:
-      IMAGE: 52north/geonode
     steps:
-      - name: Checkout
+      - 
+        name: Checkout
         uses: actions/checkout@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v4
+      - 
+        name: build and push geonode
+        uses: ./.github/actions/build_and_push
         with:
-          images: ${{ env.IMAGE }}
-          labels: |
-            "org.opencontainers.image.authors=${{ env.AUTHORS }}"
-            "org.opencontainers.image.vendor=${{ env.VENDOR }}"
-            "org.opencontainers.image.description=${{ env.DESCRIPTION }}"
-            "org.opencontainers.image.title=${{ env.TITLE }}"
-            "org.opencontainers.image.licenses=${{ env.LICENSE }}"
-          tags: |
-            ${{ env.TAG }}
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
-      - name: Build and push
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
-
+          image: 52north/geonode
+          tags: ${{ env.TAG }}
+          oci_title: "52°North GeoNode image"
+          oci_description: "GeoNode built from 52n fork"
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
+      
   build_and_push_nginx:
     runs-on: ubuntu-22.04
-    env:
-      IMAGE: 52north/geonode-nginx
     steps:
-      - name: Checkout
+      - 
+        name: Checkout
         uses: actions/checkout@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v4
+      - 
+        name: build and push nginx
+        uses: ./.github/actions/build_and_push
         with:
-          images: ${{ env.IMAGE }}
-          labels: |
-            "org.opencontainers.image.authors=${{ env.AUTHORS }}"
-            "org.opencontainers.image.vendor=${{ env.VENDOR }}"
-            "org.opencontainers.image.description=${{ env.DESCRIPTION }}"
-            "org.opencontainers.image.title=${{ env.TITLE }}"
-            "org.opencontainers.image.licenses=${{ env.LICENSE }}"
-          tags: |
-            ${{ env.TAG }}
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
-      - name: Build and push
-        uses: docker/build-push-action@v4
-        with:
-          context: ./scripts/docker/nginx/
-          file: ./scripts/docker/nginx/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+          dockerfile: ./scripts/docker/nginx/Dockerfile
+          dockercontext: ./scripts/docker/nginx/
+          image: 52north/geonode-nginx
+          tags: ${{ env.TAG }}
+          oci_title: "52°North Nginx image for GeoNode"
+          oci_description: "Nginx built for GeoNode from a 52n fork"
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
 
   build_and_push_geoserver:
     runs-on: ubuntu-22.04
     env:
       IMAGE: 52north/geonode-geoserver
     steps:
-      - name: Checkout
+      -
+        name: Checkout
         uses: actions/checkout@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v4
+      -
+        name: build and push geoserver
+        uses: ./.github/actions/build_and_push
         with:
-          images: "${{ env.IMAGE }}"
-          labels: |
-            "org.opencontainers.image.authors=${{ env.AUTHORS }}"
-            "org.opencontainers.image.vendor=${{ env.VENDOR }}"
-            "org.opencontainers.image.description=${{ env.DESCRIPTION }}"
-            "org.opencontainers.image.title=${{ env.TITLE }}"
-            "org.opencontainers.image.licenses=${{ env.LICENSE }}"
-          tags: |
-            ${{ env.TAG }}
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
-      - name: Build and push
-        uses: docker/build-push-action@v4
-        with:
-          context: ./scripts/docker/geoserver/
-          file: ./scripts/docker/geoserver/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+          dockerfile: ./scripts/docker/geoserver/Dockerfile
+          dockercontext: ./scripts/docker/geoserver/
+          image: 52north/geonode-geoserver
+          tags: ${{ env.TAG }}
+          oci_title: "52°North GeoServer image for GeoNode"
+          oci_description: "GeoServer built for GeoNode from a 52n fork"
+          registry_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          registry_password: ${{ secrets.DOCKERHUB_TOKEN_52N_MASTER }}
