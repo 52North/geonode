@@ -116,7 +116,7 @@ google-cloud-core==2.3.3
 boto3==1.28.56
 
 # Django Caches
-python-memcached<=1.59
+python-memcached<=1.61
 whitenoise==6.5.0
 Brotli==1.1.0
 
