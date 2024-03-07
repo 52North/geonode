@@ -1,0 +1,16 @@
+<div id="map" style="height: 400px;"></div>
+
+<script>
+  var map = L.map('map').setView([YOUR_DEFAULT_LATITUDE, YOUR_DEFAULT_LONGITUDE], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  var markers = L.geoJSON(processedData, {
+    pointToLayer: function(feature, latlng) {
+      return L.marker(latlng, { icon: L.icon({ iconUrl: 'your-icon.png' }) });
+    }
+  });
+
+  markers.addTo(map);
+</script>
