@@ -271,16 +271,6 @@ class ResourceManager(ResourceManagerInterface):
                         except Exception as e:
                             logger.exception(e)
 
-                        try:
-                            from pinax.ratings.models import OverallRating
-
-                            ct = ContentType.objects.get_for_model(_resource.get_real_instance())
-                            OverallRating.objects.filter(
-                                content_type=ct, object_id=_resource.get_real_instance().id
-                            ).delete()
-                        except Exception as e:
-                            logger.exception(e)
-
                         # Remove uploaded files, if any
                         ResourceBase.objects.cleanup_uploaded_files(resource_id=_resource.id)
 
@@ -859,7 +849,12 @@ class ResourceManager(ResourceManagerInterface):
                             )
                         else:
                             for user_group in get_user_groups(_owner):
-                                if not skip_registered_members_common_group(user_group):
+                                # if AdvancedSecurityWorkflowManager.is_auto_publishing_workflow() is False,
+                                # means that at least one config of the advanced workflow is set, which means that users group get view_permissions
+                                if (
+                                    not skip_registered_members_common_group(user_group)
+                                    and not AdvancedSecurityWorkflowManager.is_auto_publishing_workflow()
+                                ):
                                     _safe_assign_perm("view_resourcebase", user_group, _resource.get_self_resource())
                                     _prev_perm = (
                                         _perm_spec["groups"].get(user_group, []) if "groups" in _perm_spec else []
@@ -883,7 +878,12 @@ class ResourceManager(ResourceManagerInterface):
                                 )
                             else:
                                 for user_group in get_user_groups(_owner):
-                                    if not skip_registered_members_common_group(user_group):
+                                    # if AdvancedSecurityWorkflowManager.is_auto_publishing_workflow() is False,
+                                    # means that at least one config of the advanced workflow is set, which means that users group get view_permissions
+                                    if (
+                                        not skip_registered_members_common_group(user_group)
+                                        and not AdvancedSecurityWorkflowManager.is_auto_publishing_workflow()
+                                    ):
                                         _safe_assign_perm(
                                             "download_resourcebase", user_group, _resource.get_self_resource()
                                         )

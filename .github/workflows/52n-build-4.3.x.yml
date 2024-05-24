@@ -1,4 +1,4 @@
-name: "[52n-4.2.x -> 4.2.x] Builds GeoNode Docker Images"
+name: "[52n-4.3.x -> 4.3.x] Builds GeoNode Docker Images"
 
 concurrency:
   group: "geonode_build_master"
@@ -10,12 +10,12 @@ env:
   AUTHORS: "https://52North.org/"
   DESCRIPTION: "Builds and publishes the Docker images GeoNode, GeoServer, Nginx"
   LICENSE: "GPL-3.0"
-  TAG: 4.2.x
+  TAG: 4.3.x
 
 on:
   push:
     branches:
-      - "52n-4.2.x"
+      - "52n-4.3.x"
 
 jobs:
   build_and_push_geonode:
