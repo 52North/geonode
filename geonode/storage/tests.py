@@ -401,22 +401,6 @@ class TestStorageManager(GeoNodeBaseTestSupport):
             output = self.sut().replace(dataset, new_file)
         self.assertListEqual([expected], output["files"])
 
-    @override_settings(FILE_UPLOAD_DIRECTORY_PERMISSIONS=0o777)
-    @override_settings(FILE_UPLOAD_PERMISSIONS=0o777)
-    def test_storage_manager_copy(self):
-        """
-        Test that the copy works as expected and the permissions are corerct
-        """
-        dataset = create_single_dataset(name="test_copy")
-        dataset.files = [os.path.join(f"{self.project_root}", "tests/data/test_sld.sld")]
-        dataset.save()
-        output = self.sut().copy(dataset)
-
-        self.assertTrue(os.path.exists(output.get("files")[0]))
-        self.assertEqual(os.stat(os.path.exists(output.get("files")[0])).st_mode, 8592)
-        os.remove(output.get("files")[0])
-        self.assertFalse(os.path.exists(output.get("files")[0]))
-
 
 class TestDataRetriever(TestCase):
     @classmethod
@@ -588,23 +572,6 @@ class TestDataRetriever(TestCase):
         self.assertIsNotNone(_files.get("csv_file"))
         # extensions found more than once get indexed
         self.assertIsNotNone(_files.get("csv_file_1"))
-
-    @override_settings(
-        SUPPORTED_DATASET_FILE_TYPES=[
-            {"id": "kmz", "label": "kmz", "format": "vector", "ext": ["kmz"]},
-            {"id": "kml", "label": "kml", "format": "vector", "ext": ["kml"]},
-        ]
-    )
-    def test_zip_file_should_correctly_recognize_main_extension_with_kmz(self):
-        # reinitiate the storage manager with the zip file
-        storage_manager = self.sut(
-            remote_files={"base_file": os.path.join(f"{self.project_root}", "tests/data/Italy.kmz")}
-        )
-        storage_manager.clone_remote_files()
-
-        self.assertIsNotNone(storage_manager.data_retriever.temporary_folder)
-        _files = storage_manager.get_retrieved_paths()
-        self.assertTrue("doc.kml" in _files.get("base_file"), msg=f"files available: {_files}")
 
     def test_zip_file_should_correctly_recognize_main_extension_with_shp(self):
         # zipping files

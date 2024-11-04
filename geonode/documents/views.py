@@ -33,8 +33,10 @@ from django.template import loader
 from django.views.generic.edit import CreateView, UpdateView
 from django.http import HttpResponse, HttpResponseRedirect, Http404
 from django.core.exceptions import PermissionDenied, ObjectDoesNotExist
-from geonode.base.api.exceptions import geonode_exception_handler
 
+from geonode.assets.handlers import asset_handler_registry
+from geonode.assets.utils import get_default_asset
+from geonode.base.api.exceptions import geonode_exception_handler
 from geonode.client.hooks import hookset
 from geonode.utils import mkdtemp, resolve_object
 from geonode.base.views import batch_modify
@@ -46,7 +48,7 @@ from geonode.monitoring.models import EventType
 from geonode.storage.manager import storage_manager
 from geonode.resource.manager import resource_manager
 from geonode.decorators import check_keyword_write_perms
-from geonode.security.utils import get_user_visible_groups, AdvancedSecurityWorkflowManager
+from geonode.security.utils import get_user_visible_groups
 from geonode.base.forms import CategoryForm, TKeywordForm, ThesaurusAvailableForm
 from geonode.base.models import Thesaurus, TopicCategory
 from geonode.base import enumerations
@@ -169,12 +171,21 @@ class DocumentUploadView(CreateView):
                     owner=self.request.user,
                     doc_url=doc_form.pop("doc_url", None),
                     title=doc_form.pop("title", file.name),
+                    description=doc_form.pop("abstract", None),
                     extension=doc_form.pop("extension", None),
+                    link_type="uploaded",  # should be in geonode.base.enumerations.LINK_TYPES
+                    data_title=doc_form.pop("title", file.name),
+                    data_type=doc_form.pop("extension", None),
                     files=[storage_path],
                 ),
             )
-            if tempdir != os.path.dirname(storage_path):
-                shutil.rmtree(tempdir, ignore_errors=True)
+
+            # Removing the temp file
+            # TODO: creating a file and then cloning it as an Asset may be slow: we may want to
+            #       create the file directly in the asset dir or to move it
+            logger.info(f"Removing document temp dir {tempdir}")
+            shutil.rmtree(tempdir, ignore_errors=True)
+
         else:
             self.object = resource_manager.create(
                 None,
@@ -278,11 +289,17 @@ class DocumentUpdateView(UpdateView):
         if file:
             tempdir = mkdtemp()
             dirname = os.path.basename(tempdir)
-            filepath = storage_manager.save(f"{dirname}/{file.name}", file)
+            filepath = storage_manager.save(os.path.join(dirname, file.name), file)
             storage_path = storage_manager.path(filepath)
             self.object = resource_manager.update(
-                self.object.uuid, instance=self.object, vals=dict(owner=self.request.user, files=[storage_path])
+                self.object.uuid, instance=self.object, vals=dict(owner=self.request.user)
             )
+
+            # replace data in existing asset
+            asset = get_default_asset(self.object, link_type="uploaded")
+            if asset:
+                asset_handler_registry.get_handler(asset).replace_data(asset, [storage_path])
+
             if tempdir != os.path.dirname(storage_path):
                 shutil.rmtree(tempdir, ignore_errors=True)
 
@@ -468,9 +485,9 @@ def document_metadata(
         contact_role_forms_context[f"{role}_form"] = role_form
 
     metadata_author_groups = get_user_visible_groups(request.user)
-    if not AdvancedSecurityWorkflowManager.is_allowed_to_publish(request.user, document):
+    if not request.user.can_publish(document):
         document_form.fields["is_published"].widget.attrs.update({"disabled": "true"})
-    if not AdvancedSecurityWorkflowManager.is_allowed_to_approve(request.user, document):
+    if not request.user.can_approve(document):
         document_form.fields["is_approved"].widget.attrs.update({"disabled": "true"})
 
     register_event(request, EventType.EVENT_VIEW_METADATA, document)

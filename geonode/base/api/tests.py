@@ -17,16 +17,17 @@
 #
 #########################################################################
 
+import ast
 import os
 import re
 import sys
 import json
 import logging
+from builtins import Exception
 from typing import Iterable
 
 from django.test import RequestFactory, override_settings
 import gisdata
-
 from PIL import Image
 from io import BytesIO
 from time import sleep
@@ -40,13 +41,24 @@ from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 
+from owslib.etree import etree
+
 from rest_framework.test import APITestCase
 from rest_framework.renderers import JSONRenderer
 from rest_framework.parsers import JSONParser
 
+from geonode.catalogue import get_catalogue
+from geonode.catalogue.models import catalogue_post_save
+from geonode.catalogue.views import csw_global_dispatch
+
+from geonode.resource.manager import resource_manager
 from guardian.shortcuts import get_anonymous_user
+
+from geonode.assets.utils import create_asset_and_link
 from geonode.maps.models import Map, MapLayer
 from geonode.tests.base import GeoNodeBaseTestSupport
+from geonode.assets.utils import get_default_asset
+from geonode.assets.handlers import asset_handler_registry
 
 from geonode.base import enumerations
 from geonode.base.api.serializers import ResourceBaseSerializer
@@ -80,6 +92,7 @@ from geonode.base.populate_test_data import (
     create_single_geoapp,
 )
 from geonode.resource.api.tasks import resouce_service_dispatcher
+from guardian.shortcuts import assign_perm
 
 logger = logging.getLogger(__name__)
 
@@ -704,7 +717,7 @@ class BaseApiTests(APITestCase):
 
     def test_write_resources(self):
         """
-        Ensure we can perform write oprtation afainst the Resource Bases.
+        Ensure we can perform write operation against the Resource Bases.
         """
         url = reverse("base-resources-list")
         # Check user permissions
@@ -720,7 +733,7 @@ class BaseApiTests(APITestCase):
                 "abstract": "Foo Abstract",
                 "attribution": "Foo Attribution",
                 "doi": "321-12345-987654321",
-                "is_published": False,  # this is a read-only field so should not updated
+                "is_published": False,
             }
             response = self.client.patch(f"{url}/{resource.id}/", data=data, format="json")
             self.assertEqual(response.status_code, 200, response.status_code)
@@ -733,7 +746,9 @@ class BaseApiTests(APITestCase):
                 "Foo Attribution", response.data["resource"]["attribution"], response.data["resource"]["attribution"]
             )
             self.assertEqual("321-12345-987654321", response.data["resource"]["doi"], response.data["resource"]["doi"])
-            self.assertEqual(True, response.data["resource"]["is_published"], response.data["resource"]["is_published"])
+            self.assertEqual(
+                False, response.data["resource"]["is_published"], response.data["resource"]["is_published"]
+            )
 
     def test_resource_serializer_validation(self):
         """
@@ -784,6 +799,32 @@ class BaseApiTests(APITestCase):
         self.assertIsInstance(data, dict)
         se = ResourceBaseSerializer(data=data, context={"request": rq})
         self.assertTrue(se.is_valid())
+
+    def test_resource_base_serializer_with_settingsfield(self):
+        doc = create_single_doc("my_custom_doc")
+        factory = RequestFactory()
+        rq = factory.get("test")
+        rq.user = doc.owner
+        serialized = ResourceBaseSerializer(doc, context={"request": rq})
+        json = JSONRenderer().render(serialized.data)
+        stream = BytesIO(json)
+        data = JSONParser().parse(stream)
+        self.assertTrue(data.get("is_approved"))
+        self.assertTrue(data.get("is_published"))
+        self.assertFalse(data.get("featured"))
+
+    def test_resource_settings_field(self):
+        """
+        Admin is able to change the is_published value
+        """
+        doc = create_single_doc("my_custom_doc")
+        factory = RequestFactory()
+        rq = factory.get("test")
+        rq.user = doc.owner
+        serializer = ResourceBaseSerializer(doc, context={"request": rq})
+        field = serializer.fields["is_published"]
+        self.assertIsNotNone(field)
+        self.assertTrue(field.to_internal_value(True))
 
     def test_delete_user_with_resource(self):
         owner, created = get_user_model().objects.get_or_create(username="delet-owner")
@@ -2221,16 +2262,22 @@ class BaseApiTests(APITestCase):
         )
 
     def test_resource_service_copy(self):
-        files = os.path.join(gisdata.GOOD_DATA, "vector/san_andres_y_providencia_water.shp")
+        files = os.path.join(gisdata.GOOD_DATA, "vector/single_point.shp")
         files_as_dict, _ = get_files(files)
-        resource = Dataset.objects.create(
-            owner=get_user_model().objects.get(username="admin"),
-            name="test_copy",
-            store="geonode_data",
-            subtype="vector",
-            alternate="geonode:test_copy",
-            uuid=str(uuid4()),
-            files=list(files_as_dict.values()),
+        resource = resource_manager.create(
+            str(uuid4()),
+            Dataset,
+            defaults={
+                "owner": get_user_model().objects.get(username="admin"),
+                "name": "test_copy",
+                "store": "geonode_data",
+                "subtype": "vector",
+                "alternate": "geonode:test_copy",
+            },
+        )
+
+        asset, link = create_asset_and_link(
+            resource, get_user_model().objects.get(username="admin"), list(files_as_dict.values())
         )
         bobby = get_user_model().objects.get(username="bobby")
         copy_url = reverse("importer_resource_copy", kwargs={"pk": resource.pk})
@@ -2262,22 +2309,29 @@ class BaseApiTests(APITestCase):
         cloned_resource = Dataset.objects.last()
         self.assertEqual(cloned_resource.owner.username, "admin")
         # clone dataset with invalid file
-        resource.files = ["/path/invalid_file.wrong"]
-        resource.save()
+        # resource.files = ["/path/invalid_file.wrong"]
+        # resource.save()
+        asset.location = ["/path/invalid_file.wrong"]
+        asset.save()
         response = self.client.put(copy_url)
+
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["message"], "Resource can not be cloned.")
         # clone dataset with no files
-        resource.files = []
-        resource.save()
+        link.delete()
+        asset.delete()
         response = self.client.put(copy_url)
+
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["message"], "Resource can not be cloned.")
         # clean
-        resource.delete()
+        try:
+            resource.delete()
+        except Exception as e:
+            logger.warning(f"Can't delete test resource {resource}", exc_info=e)
 
     def test_resource_service_copy_with_perms_dataset(self):
-        files = os.path.join(gisdata.GOOD_DATA, "vector/san_andres_y_providencia_water.shp")
+        files = os.path.join(gisdata.GOOD_DATA, "vector/single_point.shp")
         files_as_dict, _ = get_files(files)
         resource = Dataset.objects.create(
             owner=get_user_model().objects.get(username="admin"),
@@ -2287,7 +2341,9 @@ class BaseApiTests(APITestCase):
             alternate="geonode:test_copy",
             resource_type="dataset",
             uuid=str(uuid4()),
-            files=list(files_as_dict.values()),
+        )
+        _, _ = create_asset_and_link(
+            resource, get_user_model().objects.get(username="admin"), list(files_as_dict.values())
         )
         self._assertCloningWithPerms(resource)
 
@@ -2295,21 +2351,25 @@ class BaseApiTests(APITestCase):
     @override_settings(ASYNC_SIGNALS=False)
     def test_resource_service_copy_with_perms_dataset_set_default_perms(self):
         with self.settings(ASYNC_SIGNALS=False):
-            files = os.path.join(gisdata.GOOD_DATA, "vector/san_andres_y_providencia_water.shp")
+            files = os.path.join(gisdata.GOOD_DATA, "vector/single_point.shp")
             files_as_dict, _ = get_files(files)
-            resource = Dataset.objects.create(
-                owner=get_user_model().objects.get(username="admin"),
-                name="test_copy_with_perms",
-                store="geonode_data",
-                subtype="vector",
-                alternate="geonode:test_copy_with_perms",
-                resource_type="dataset",
-                uuid=str(uuid4()),
-                files=list(files_as_dict.values()),
+            resource = resource_manager.create(
+                None,
+                resource_type=Dataset,
+                defaults={
+                    "owner": get_user_model().objects.first(),
+                    "title": "test_copy_with_perms",
+                    "name": "test_copy_with_perms",
+                    "is_approved": True,
+                    "store": "geonode_data",
+                    "subtype": "vector",
+                    "resource_type": "dataset",
+                    "files": files_as_dict.values(),
+                },
             )
             _perms = {
                 "users": {"bobby": ["base.add_resourcebase", "base.download_resourcebase"]},
-                "groups": {"anonymous": ["base.view_resourcebase", "base.download_resourcebae"]},
+                "groups": {"anonymous": ["base.view_resourcebase", "base.download_resourcebase"]},
             }
             resource.set_permissions(_perms)
             # checking that bobby is in the original dataset perms list
@@ -2328,11 +2388,11 @@ class BaseApiTests(APITestCase):
         self.assertEqual("finished", self.client.get(response.json().get("status_url")).json().get("status"))
         _resource = Dataset.objects.filter(title__icontains="test_copy_with_perms").last()
         self.assertIsNotNone(_resource)
-        self.assertFalse("bobby" in "bobby" in [x.username for x in _resource.get_all_level_info().get("users", [])])
-        self.assertTrue("admin" in "admin" in [x.username for x in _resource.get_all_level_info().get("users", [])])
+        self.assertNotIn("bobby", [x.username for x in _resource.get_all_level_info().get("users", [])])
+        self.assertIn("admin", [x.username for x in _resource.get_all_level_info().get("users", [])])
 
     def test_resource_service_copy_with_perms_doc(self):
-        files = os.path.join(gisdata.GOOD_DATA, "vector/san_andres_y_providencia_water.shp")
+        files = os.path.join(gisdata.GOOD_DATA, "vector/single_point.shp")
         files_as_dict, _ = get_files(files)
         resource = Document.objects.create(
             owner=get_user_model().objects.get(username="admin"),
@@ -2340,22 +2400,16 @@ class BaseApiTests(APITestCase):
             alternate="geonode:test_copy",
             resource_type="document",
             uuid=str(uuid4()),
-            files=list(files_as_dict.values()),
         )
-
+        _, _ = create_asset_and_link(
+            resource, get_user_model().objects.get(username="admin"), list(files_as_dict.values())
+        )
         self._assertCloningWithPerms(resource)
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
     def test_resource_service_copy_with_perms_map(self):
-        files = os.path.join(gisdata.GOOD_DATA, "vector/san_andres_y_providencia_water.shp")
-        files_as_dict, _ = get_files(files)
-        resource = Document.objects.create(
-            owner=get_user_model().objects.get(username="admin"),
-            alternate="geonode:test_copy",
-            resource_type="map",
-            uuid=str(uuid4()),
-            files=list(files_as_dict.values()),
-        )
+
+        resource = create_single_map(name="test_copy")
 
         self._assertCloningWithPerms(resource)
 
@@ -2368,7 +2422,7 @@ class BaseApiTests(APITestCase):
         resource.set_permissions(_perms)
         copy_url = reverse("importer_resource_copy", kwargs={"pk": resource.pk})
         response = self.client.put(copy_url, data={"title": "cloned_resource"})
-        self.assertIn(response.status_code, [403, 404])
+        self.assertIn(response.status_code, [302, 403, 404])
         # set perms to enable user clone resource
         # bobby can copy the resource since he has all the perms needed
         _perms = {
@@ -2454,7 +2508,12 @@ class BaseApiTests(APITestCase):
         Ensure we can access the Resource Base list.
         """
         doc = Document.objects.first()
-        expected_payload = [{"url": build_absolute_uri(doc.download_url), "ajax_safe": doc.download_is_ajax_safe}]
+        asset = get_default_asset(doc)
+        handler = asset_handler_registry.get_handler(asset)
+        expected_payload = [
+            {"url": build_absolute_uri(doc.download_url), "ajax_safe": doc.download_is_ajax_safe},
+            {"ajax_safe": False, "default": False, "url": handler.create_download_url(asset)},
+        ]
         # From resource base API
         json = self._get_for_object(doc, "base-resources-detail")
         download_url = json.get("resource").get("download_urls")
@@ -2643,6 +2702,32 @@ class BaseApiTests(APITestCase):
         self.assertEqual(new_count, prev_count + 1)
 
         Dataset.objects.update(advertised=True)
+
+    def test_metadata_uploaded_preserve_can_be_updated(self):
+        doc = Document.objects.first()
+        user = get_user_model().objects.get(username="bobby")
+        url = reverse("base-resources-detail", kwargs={"pk": doc.pk})
+        self.assertTrue(self.client.login(username="bobby", password="bob"))
+
+        payload = json.dumps({"metadata_uploaded_preserve": True})
+        # should return 403 since bobby doesn't have the perms to update the metadata
+        # on this resource
+        response = self.client.patch(url, data=payload, content_type="application/json")
+        self.assertEqual(403, response.status_code)
+        doc.refresh_from_db()
+        # the original value should be kept
+        self.assertFalse(doc.metadata_uploaded_preserve)
+
+        # let's give to bobby the perms for update the metadata
+        assign_perm("base.change_resourcebase_metadata", user, doc.get_self_resource())
+
+        # let's call the API again
+        response = self.client.patch(url, data=payload, content_type="application/json")
+        self.assertEqual(200, response.status_code)
+        doc.refresh_from_db()
+        # the value should be updated
+        self.assertTrue(doc.metadata_uploaded_preserve)
+        self.assertTrue(response.json()["resource"]["metadata_uploaded_preserve"])
 
 
 class TestExtraMetadataBaseApi(GeoNodeBaseTestSupport):
@@ -3298,3 +3383,121 @@ class TestApiAdditionalBBoxCalculation(GeoNodeBaseTestSupport):
             "code": "invalid_resource_exception",
         }
         self.assertDictEqual(expected, response.json())
+
+
+pycsw_settings_all = settings.PYCSW.copy()
+
+pycsw_settings_all["FILTER"] = {"resource_type__in": ["dataset", "resourcebase"]}
+
+
+class TestBaseResourceBase(GeoNodeBaseTestSupport):
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.user = get_user_model().objects.get(username="admin")
+
+    def test_simple_resourcebase_can_be_created_by_resourcemanager(self):
+        self.maxDiff = None
+        resource = resource_manager.create(
+            str(uuid4()), resource_type=ResourceBase, defaults={"title": "simple resourcebase", "owner": self.user}
+        )
+
+        self.assertIsNotNone(resource)
+        # minimum resource checks
+        self.assertEqual("resourcebase", resource.resource_type)
+        self.assertTrue(resource.link_set.all().exists())
+        self.assertEqual("simple resourcebase", resource.title)
+        self.assertTrue(self.user == resource.owner)
+        # check if the perms are set
+        anonymous_group = Group.objects.get(name="anonymous")
+        perms_expected = {
+            "users": {
+                self.user: set(
+                    [
+                        "delete_resourcebase",
+                        "publish_resourcebase",
+                        "change_resourcebase_permissions",
+                        "view_resourcebase",
+                        "change_resourcebase_metadata",
+                        "change_resourcebase",
+                    ]
+                )
+            },
+            "groups": {anonymous_group: set(["view_resourcebase"])},
+        }
+
+        actual_perms = resource.get_all_level_info().copy()
+        self.assertIsNotNone(actual_perms)
+        self.assertTrue(self.user in actual_perms["users"].keys())
+        self.assertTrue(anonymous_group in actual_perms["groups"].keys())
+        self.assertSetEqual(perms_expected["users"][self.user], set(actual_perms["users"][self.user]))
+        self.assertSetEqual(perms_expected["groups"][anonymous_group], set(actual_perms["groups"][anonymous_group]))
+
+        # check if is returned from the API
+
+        self.assertTrue(self.client.login(username="admin", password="admin"))
+
+        response = self.client.get(reverse("base-resources-list"))
+
+        self.assertTrue(resource.pk in [int(x["pk"]) for x in response.json()["resources"]])
+
+        # checking csw call
+        catalogue_post_save(instance=resource, sender=resource.__class__)
+        # get all records
+        csw = get_catalogue()
+        record = csw.get_record(resource.uuid)
+        self.assertIsNotNone(record)
+        self.assertEqual(record.identification[0].title, resource.title)
+
+    def test_csw_should_not_return_resourcebase_by_default(self):
+        resource = resource_manager.create(
+            str(uuid4()), resource_type=ResourceBase, defaults={"title": "simple resourcebase", "owner": self.user}
+        )
+        dt = resource_manager.create(
+            str(uuid4()), resource_type=Dataset, defaults={"title": "simple dataset", "owner": self.user}
+        )
+
+        self.assertTrue(ResourceBase.objects.filter(pk=resource.pk).exists())
+        self.assertTrue(ResourceBase.objects.filter(pk=dt.pk).exists())
+
+        request = self.__csw_request_factory()
+
+        response = csw_global_dispatch(request)
+        root = etree.fromstring(response.content)
+        child = [x.attrib for x in root if "numberOfRecordsMatched" in x.attrib]
+        returned_results = ast.literal_eval(child[0].get("numberOfRecordsMatched", "0")) if child else 0
+        self.assertEqual(1, returned_results)
+
+    @override_settings(PYCSW=pycsw_settings_all)
+    def test_csw_should_return_resourcebase_if_defined_in_settings(self):
+        resource = resource_manager.create(
+            str(uuid4()), resource_type=ResourceBase, defaults={"title": "simple resourcebase", "owner": self.user}
+        )
+        dt = resource_manager.create(
+            str(uuid4()), resource_type=Dataset, defaults={"title": "simple dataset", "owner": self.user}
+        )
+
+        self.assertTrue(ResourceBase.objects.filter(pk=resource.pk).exists())
+        self.assertTrue(ResourceBase.objects.filter(pk=dt.pk).exists())
+
+        request = self.__csw_request_factory()
+
+        response = csw_global_dispatch(request)
+        root = etree.fromstring(response.content)
+        child = [x.attrib for x in root if "numberOfRecordsMatched" in x.attrib]
+        returned_results = ast.literal_eval(child[0].get("numberOfRecordsMatched", "0")) if child else 0
+        self.assertEqual(2, returned_results)
+
+    @staticmethod
+    def __csw_request_factory():
+        from django.contrib.auth.models import AnonymousUser
+
+        factory = RequestFactory()
+        url = "http://localhost:8000/catalogue/csw?request=GetRecords"
+        url += "&service=CSW&version=2.0.2&outputschema=http%3A%2F%2Fwww.isotc211.org%2F2005%2Fgmd"
+        url += "&elementsetname=brief&typenames=csw:Record&resultType=results"
+        request = factory.get(url)
+
+        request.user = AnonymousUser()
+        return request

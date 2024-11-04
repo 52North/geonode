@@ -26,6 +26,7 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 from geonode.base.enumerations import SOURCE_TYPE_REMOTE
+from geonode.base.models import ResourceBase
 from geonode.documents.models import Document
 from geonode.geoapps.models import GeoApp
 from geonode.maps.models import Map, MapLayer
@@ -33,6 +34,7 @@ from geonode.layers.models import Dataset
 from geonode.geoserver.helpers import ogc_server_settings
 from geonode.utils import get_dataset_name, get_dataset_workspace
 from geonode.thumbs import utils
+from geonode.base import bbox_utils
 from geonode.thumbs.exceptions import ThumbnailError
 
 logger = logging.getLogger(__name__)
@@ -109,10 +111,12 @@ def create_thumbnail(
 
     if isinstance(instance, Map):
         is_map_with_datasets = MapLayer.objects.filter(map=instance, local=True).exclude(dataset=None).exists()
+        if is_map_with_datasets:
+            compute_bbox_from_datasets = True
     if bbox:
-        bbox = utils.clean_bbox(bbox, target_crs)
+        bbox = bbox_utils.clean_bbox(bbox, target_crs)
     elif instance.ll_bbox_polygon:
-        bbox = utils.clean_bbox(instance.ll_bbox, target_crs)
+        bbox = bbox_utils.clean_bbox(instance.ll_bbox, target_crs)
     else:
         compute_bbox_from_datasets = True
 
@@ -207,7 +211,7 @@ def create_thumbnail(
     return instance.thumbnail_url
 
 
-def _generate_thumbnail_name(instance: Union[Dataset, Map, Document, GeoApp]) -> Optional[str]:
+def _generate_thumbnail_name(instance: Union[Dataset, Map, Document, GeoApp, ResourceBase]) -> Optional[str]:
     """
     Method returning file name for the thumbnail.
     If provided instance is a Map, and doesn't have any defined datasets, None is returned.
@@ -233,6 +237,9 @@ def _generate_thumbnail_name(instance: Union[Dataset, Map, Document, GeoApp]) ->
 
     elif isinstance(instance, GeoApp):
         file_name = f"geoapp-{instance.uuid}-thumb.png"
+
+    elif isinstance(instance, ResourceBase):
+        file_name = f"resourcebase-{instance.uuid}-thumb.png"
     else:
         raise ThumbnailError("Thumbnail generation didn't recognize the provided instance.")
 
@@ -264,16 +271,16 @@ def _datasets_locations(
         locations.append([instance.ows_url or ogc_server_settings.LOCATION, [instance.alternate], []])
         if compute_bbox:
             if instance.ll_bbox_polygon:
-                bbox = utils.clean_bbox(instance.ll_bbox, target_crs)
+                bbox = bbox_utils.clean_bbox(instance.ll_bbox, target_crs)
             elif (
                 instance.bbox[-1].upper() != "EPSG:3857"
                 and target_crs.upper() == "EPSG:3857"
-                and utils.exceeds_epsg3857_area_of_use(instance.bbox)
+                and bbox_utils.exceeds_epsg3857_area_of_use(instance.bbox)
             ):
                 # handle exceeding the area of use of the default thumb's CRS
-                bbox = utils.transform_bbox(utils.crop_to_3857_area_of_use(instance.bbox), target_crs)
+                bbox = bbox_utils.transform_bbox(bbox_utils.crop_to_3857_area_of_use(instance.bbox), target_crs)
             else:
-                bbox = utils.transform_bbox(instance.bbox, target_crs)
+                bbox = bbox_utils.transform_bbox(instance.bbox, target_crs)
     elif isinstance(instance, Map):
         for maplayer in instance.maplayers.filter(visibility=True).order_by("order").iterator():
             if maplayer.dataset and maplayer.dataset.sourcetype == SOURCE_TYPE_REMOTE and not maplayer.dataset.ows_url:
@@ -331,29 +338,9 @@ def _datasets_locations(
                         ]
                     )
 
-            if compute_bbox:
-                if dataset.ll_bbox_polygon:
-                    dataset_bbox = utils.clean_bbox(dataset.ll_bbox, target_crs)
-                elif (
-                    dataset.bbox[-1].upper() != "EPSG:3857"
-                    and target_crs.upper() == "EPSG:3857"
-                    and utils.exceeds_epsg3857_area_of_use(dataset.bbox)
-                ):
-                    # handle exceeding the area of use of the default thumb's CRS
-                    dataset_bbox = utils.transform_bbox(utils.crop_to_3857_area_of_use(dataset.bbox), target_crs)
-                else:
-                    dataset_bbox = utils.transform_bbox(dataset.bbox, target_crs)
-
-                if not bbox:
-                    bbox = dataset_bbox
-                else:
-                    # dataset's BBOX: (left, right, bottom, top)
-                    bbox = [
-                        min(bbox[0], dataset_bbox[0]),
-                        max(bbox[1], dataset_bbox[1]),
-                        min(bbox[2], dataset_bbox[2]),
-                        max(bbox[3], dataset_bbox[3]),
-                    ]
+        if compute_bbox:
+            instance.compute_bbox(target_crs)
+            bbox = instance.bbox
 
     if bbox and len(bbox) < 5:
         bbox = list(bbox) + [target_crs]  # convert bbox to list, if it's tuple

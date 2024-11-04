@@ -54,7 +54,7 @@ from geonode.maps.forms import MapForm
 from geonode.maps.models import Map, MapLayer
 from geonode.monitoring.models import EventType
 from geonode.people.forms import ProfileForm
-from geonode.security.utils import get_user_visible_groups, AdvancedSecurityWorkflowManager
+from geonode.security.utils import get_user_visible_groups
 from geonode.utils import check_ogc_backend, http_client, resolve_object
 
 if check_ogc_backend(geoserver.BACKEND_PACKAGE):
@@ -257,9 +257,9 @@ def map_metadata(
     layers = MapLayer.objects.filter(map=map_obj.id)
     metadata_author_groups = get_user_visible_groups(request.user)
 
-    if not AdvancedSecurityWorkflowManager.is_allowed_to_publish(request.user, map_obj):
+    if not request.user.can_publish(map_obj):
         map_form.fields["is_published"].widget.attrs.update({"disabled": "true"})
-    if not AdvancedSecurityWorkflowManager.is_allowed_to_approve(request.user, map_obj):
+    if not request.user.can_approve(map_obj):
         map_form.fields["is_approved"].widget.attrs.update({"disabled": "true"})
 
     register_event(request, EventType.EVENT_VIEW_METADATA, map_obj)
@@ -504,18 +504,6 @@ def mapdataset_attributes(request, layername):
     # Return custom layer attribute labels/order in JSON format
     layer = Dataset.objects.get(alternate=layername)
     return HttpResponse(json.dumps(layer.attribute_config()), content_type="application/json")
-
-
-def get_suffix_if_custom(map):
-    if map.use_custom_template:
-        if map.featuredurl:
-            return map.featuredurl
-        elif map.urlsuffix:
-            return map.urlsuffix
-        else:
-            return None
-    else:
-        return None
 
 
 def ajax_url_lookup(request):

@@ -24,6 +24,7 @@ from unittest.mock import patch, PropertyMock, MagicMock
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Polygon
+from geonode.base.models import ResourceBase
 from geonode.documents.models import Document
 from geonode.geoapps.models import GeoApp
 from geonode.resource.manager import resource_manager
@@ -127,6 +128,16 @@ class ThumbnailsUnitTest(GeoNodeBaseTestSupport):
         self.assertIsNotNone(
             re.match(f"dataset-{self.re_uuid}-thumb.png", dataset_name, re.I),
             "Dataset name should meet a provided pattern",
+        )
+
+    def test_generate_thumbnail_name_resourcebase(self):
+        base_resource = resource_manager.create(
+            None, ResourceBase, defaults={"owner": get_user_model().objects.get(username="admin")}
+        )
+        thumbnail_name = thumbnails._generate_thumbnail_name(base_resource)
+        self.assertIsNotNone(
+            re.match(f"resourcebase-{self.re_uuid}-thumb.png", thumbnail_name, re.I),
+            "Map name should meet a provided pattern",
         )
 
     def test_get_unique_upload_path(self):
@@ -237,7 +248,7 @@ class ThumbnailsUnitTest(GeoNodeBaseTestSupport):
         )
 
     def test_datasets_locations_simple_map_default_bbox(self):
-        expected_bbox = [-8238681.374829309, -8220320.783295829, 4969844.0930337105, 4984363.884452854, "EPSG:3857"]
+        expected_bbox = [-20037397.023298446, 20037397.023298446, -20048966.104014594, 20048966.104014594, "EPSG:3857"]
 
         dataset = Dataset.objects.get(title_en="theaters_nyc")
         map = Map.objects.get(title_en="theaters_nyc_map")

@@ -21,6 +21,7 @@ import os
 import copy
 import typing
 import logging
+import itertools
 
 from uuid import uuid1, uuid4
 from abc import ABCMeta, abstractmethod
@@ -36,18 +37,21 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.utils.module_loading import import_string
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ObjectDoesNotExist, ValidationError, FieldDoesNotExist
+from django.core.exceptions import ValidationError, FieldDoesNotExist
 
+
+from geonode.base.models import ResourceBase, LinkedResource
 from geonode.thumbs.thumbnails import _generate_thumbnail_name
+from geonode.thumbs.utils import ThumbnailAlgorithms
 from geonode.documents.tasks import create_document_thumbnail
 from geonode.security.permissions import PermSpecCompact, DATA_STYLABLE_RESOURCES_SUBTYPES
 from geonode.security.utils import perms_as_set, get_user_groups, skip_registered_members_common_group
 
 from . import settings as rm_settings
 from .utils import update_resource, resourcebase_post_save
+from geonode.assets.utils import create_asset_and_link_dict, rollback_asset_and_link, copy_assets_and_links, create_link
 
 from ..base import enumerations
-from ..base.models import ResourceBase, LinkedResource
 from ..security.utils import AdvancedSecurityWorkflowManager
 from ..layers.metadata import parse_metadata
 from ..documents.models import Document
@@ -121,61 +125,6 @@ class ResourceManagerInterface(metaclass=ABCMeta):
         - It is possible to pass initial default values, like the 'files' from the 'storage_manager' trhgouh the 'vals' dictionary
         - The 'xml_file' parameter allows to fetch metadata values from a file
         - The 'notify' parameter allows to notify the members that the resource has been updated
-        """
-        pass
-
-    @abstractmethod
-    def ingest(
-        self,
-        files: typing.List[str],
-        /,
-        uuid: str = None,
-        resource_type: typing.Optional[object] = None,
-        defaults: dict = {},
-        **kwargs,
-    ) -> ResourceBase:
-        """The method allows to create a resource by providing the list of files.
-
-        e.g.:
-            In [1]: from geonode.resource.manager import resource_manager
-
-            In [2]: from geonode.layers.models import Dataset
-
-            In [3]: from django.contrib.auth import get_user_model
-
-            In [4]: admin = get_user_model().objects.get(username='admin')
-
-            In [5]: files = ["/.../san_andres_y_providencia_administrative.dbf", "/.../san_andres_y_providencia_administrative.prj",
-            ...:  "/.../san_andres_y_providencia_administrative.shx", "/.../san_andres_y_providencia_administrative.sld", "/.../san_andres_y_providencia_administrative.shp"]
-
-            In [6]: resource_manager.ingest(files, resource_type=Dataset, defaults={'owner': admin})
-        """
-        pass
-
-    @abstractmethod
-    def copy(
-        self, instance: ResourceBase, /, uuid: str = None, owner: settings.AUTH_USER_MODEL = None, defaults: dict = {}
-    ) -> ResourceBase:
-        """The method makes a copy of the existing resource.
-
-        - It makes a copy of the files
-        - It creates a new layer on the GIS backend in the case the ResourceType is a Dataset
-        """
-        pass
-
-    @abstractmethod
-    def append(self, instance: ResourceBase, vals: dict = {}) -> ResourceBase:
-        """The method appends data to an existing resource.
-
-        - It assumes any GIS backend resource (e.g. layers on GeoServer) already exist.
-        """
-        pass
-
-    @abstractmethod
-    def replace(self, instance: ResourceBase, vals: dict = {}) -> ResourceBase:
-        """The method replaces data of an existing resource.
-
-        - It assumes any GIS backend resource (e.g. layers on GeoServer) already exist.
         """
         pass
 
@@ -313,20 +262,35 @@ class ResourceManager(ResourceManagerInterface):
         if resource_type.objects.filter(uuid=uuid).exists():
             return resource_type.objects.filter(uuid=uuid).get()
         uuid = uuid or str(uuid4())
-        _resource, _created = resource_type.objects.get_or_create(uuid=uuid, defaults=defaults)
+        resource_dict = {  # TODO: cleanup params and dicts
+            k: v
+            for k, v in defaults.items()
+            if k not in ("data_title", "data_type", "description", "files", "link_type", "extension", "asset")
+        }
+        _resource, _created = resource_type.objects.get_or_create(uuid=uuid, defaults=resource_dict)
         if _resource and _created:
             _resource.set_processing_state(enumerations.STATE_RUNNING)
             try:
+                # if files exist: create an Asset out of them and link it to the Resource
+                asset, link = (None, None)  # safe init in case of exception
+                if defaults.get("files", None):
+                    logger.debug(f"Found files when creating resource {_resource}: {defaults['files']}")
+                    asset, link = create_asset_and_link_dict(_resource, defaults, clone_files=True)
+                elif defaults.get("asset", None):
+                    logger.debug(f"Found asset when creating resource {_resource}: {defaults['asset']}")
+                    link = create_link(_resource, **defaults)
+
                 with transaction.atomic():
                     _resource.set_missing_info()
                     _resource = self._concrete_resource_manager.create(
-                        uuid, resource_type=resource_type, defaults=defaults
+                        uuid, resource_type=resource_type, defaults=resource_dict
                     )
                 _resource.save()
                 resourcebase_post_save(_resource.get_real_instance())
                 _resource.set_processing_state(enumerations.STATE_PROCESSED)
             except Exception as e:
                 logger.exception(e)
+                rollback_asset_and_link(asset, link)  # we are not removing the Asset passed in defaults
                 self.delete(_resource.uuid, instance=_resource)
                 raise e
         return _resource
@@ -429,58 +393,6 @@ class ResourceManager(ResourceManagerInterface):
                     _resource.clear_dirty_state()
         return _resource
 
-    def ingest(
-        self,
-        files: typing.List[str],
-        /,
-        uuid: str = None,
-        resource_type: typing.Optional[object] = None,
-        defaults: dict = {},
-        **kwargs,
-    ) -> ResourceBase:
-        instance = None
-        to_update = defaults.copy()
-        if "files" in to_update:
-            to_update.pop("files")
-        try:
-            with transaction.atomic():
-                if resource_type == Document:
-                    if "name" in to_update:
-                        to_update.pop("name")
-                    if files:
-                        to_update["files"] = storage_manager.copy_files_list(files)
-                    instance = self.create(uuid, resource_type=Document, defaults=to_update)
-                elif resource_type == Dataset:
-                    if files:
-                        instance = self.create(uuid, resource_type=Dataset, defaults=to_update)
-                if instance:
-                    instance = self._concrete_resource_manager.ingest(
-                        storage_manager.copy_files_list(files),
-                        uuid=instance.uuid,
-                        resource_type=resource_type,
-                        defaults=to_update,
-                        **kwargs,
-                    )
-                    instance.set_processing_state(enumerations.STATE_PROCESSED)
-                    instance.save(notify=False)
-        except Exception as e:
-            logger.exception(e)
-            if instance:
-                instance.set_processing_state(enumerations.STATE_INVALID)
-        if instance:
-            try:
-                resourcebase_post_save(instance.get_real_instance())
-                # Finalize Upload
-                if "user" in to_update:
-                    to_update.pop("user")
-                instance = self.update(instance.uuid, instance=instance, vals=to_update)
-                self.set_thumbnail(instance.uuid, instance=instance)
-            except Exception as e:
-                logger.exception(e)
-            finally:
-                instance.clear_dirty_state()
-        return instance
-
     def copy(
         self, instance: ResourceBase, /, uuid: str = None, owner: settings.AUTH_USER_MODEL = None, defaults: dict = {}
     ) -> ResourceBase:
@@ -523,13 +435,24 @@ class ResourceManager(ResourceManagerInterface):
                             _maplayer.pk = _maplayer.id = None
                             _maplayer.map = _resource.get_real_instance()
                             _maplayer.save()
-                    to_update = {}
-                    try:
-                        to_update = storage_manager.copy(_resource).copy()
-                    except Exception as e:
-                        logger.exception(e)
 
-                    _resource = self._concrete_resource_manager.copy(instance, uuid=_resource.uuid, defaults=to_update)
+                    assets_and_links = copy_assets_and_links(instance, target=_resource)
+                    # we're just merging all the files together: it won't work once we have multiple assets per resource
+                    # TODO: get the files from the proper Asset, or make the _concrete_resource_manager.copy use assets
+                    to_update = {}
+
+                    files = list(itertools.chain.from_iterable([asset.location for asset, _ in assets_and_links]))
+                    if files:
+                        to_update = {"files": files}
+
+                    assets_and_links = copy_assets_and_links(instance, target=_resource)
+                    # we're just merging all the files together: it won't work once we have multiple assets per resource
+                    # TODO: get the files from the proper Asset, or make the _concrete_resource_manager.copy use assets
+                    to_update = {}
+
+                    files = list(itertools.chain.from_iterable([asset.location for asset, _ in assets_and_links]))
+                    if files:
+                        to_update = {"files": files}
 
             except Exception as e:
                 logger.exception(e)
@@ -548,47 +471,6 @@ class ResourceManager(ResourceManagerInterface):
                 finally:
                     _resource.set_processing_state(enumerations.STATE_PROCESSED)
         return _resource
-
-    def append(self, instance: ResourceBase, vals: dict = {}, *args, **kwargs):
-        if self._validate_resource(instance.get_real_instance(), "append"):
-            self._concrete_resource_manager.append(instance.get_real_instance(), vals=vals)
-            to_update = vals.copy()
-            if instance:
-                if "user" in to_update:
-                    to_update.pop("user")
-                return self.update(instance.uuid, instance.get_real_instance(), vals=to_update, *args, **kwargs)
-        return instance
-
-    def replace(self, instance: ResourceBase, vals: dict = {}, *args, **kwargs):
-        if self._validate_resource(instance.get_real_instance(), "replace"):
-            if vals.get("files", None) and kwargs.get("store_spatial_files", True):
-                vals.update(storage_manager.replace(instance.get_real_instance(), vals.get("files")))
-            self._concrete_resource_manager.replace(instance.get_real_instance(), vals=vals, *args, **kwargs)
-            to_update = vals.copy()
-            if instance:
-                if "user" in to_update:
-                    to_update.pop("user")
-                return self.update(instance.uuid, instance.get_real_instance(), vals=to_update, *args, **kwargs)
-        return instance
-
-    def _validate_resource(self, instance: ResourceBase, action_type: str) -> bool:
-        if not isinstance(instance, Dataset) and action_type == "append":
-            raise Exception("Append data is available only for Layers")
-
-        if isinstance(instance, Document) and action_type == "replace":
-            return True
-
-        exists = self._concrete_resource_manager.exists(instance.uuid, instance)
-
-        if exists and action_type == "append":
-            if isinstance(instance, Dataset):
-                if instance.is_vector():
-                    is_valid = True
-        elif exists and action_type == "replace":
-            is_valid = True
-        else:
-            raise ObjectDoesNotExist("Resource does not exists")
-        return is_valid
 
     @transaction.atomic
     def exec(self, method: str, uuid: str, /, instance: ResourceBase = None, **kwargs) -> ResourceBase:
@@ -934,6 +816,7 @@ class ResourceManager(ResourceManagerInterface):
         overwrite: bool = True,
         check_bbox: bool = True,
         thumbnail=None,
+        thumbnail_algorithm=ThumbnailAlgorithms.fit,
     ) -> bool:
         _resource = instance or ResourceManager._get_instance(uuid)
         if _resource:
@@ -941,7 +824,7 @@ class ResourceManager(ResourceManagerInterface):
                 with transaction.atomic():
                     if thumbnail:
                         file_name = _generate_thumbnail_name(_resource.get_real_instance())
-                        _resource.save_thumbnail(file_name, thumbnail)
+                        _resource.save_thumbnail(file_name, thumbnail, thumbnail_algorithm=thumbnail_algorithm)
                     else:
                         if instance and isinstance(instance.get_real_instance(), Document):
                             if overwrite or not instance.thumbnail_url:

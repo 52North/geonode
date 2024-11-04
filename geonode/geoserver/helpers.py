@@ -24,14 +24,10 @@ import time
 import uuid
 import json
 import errno
-import typing
 import logging
 import datetime
-import tempfile
 import traceback
-import dataclasses
 
-from shutil import copyfile
 from itertools import cycle
 from collections import defaultdict
 from os.path import basename, splitext, isfile
@@ -42,7 +38,6 @@ import xml.etree.ElementTree as ET
 from django.conf import settings
 from django.utils import timezone
 from django.db import transaction
-from django.contrib.auth import get_user_model
 from django.utils.module_loading import import_string
 from django.core.exceptions import ImproperlyConfigured
 from django.template.loader import render_to_string
@@ -1322,16 +1317,6 @@ def get_wcs_record(instance, retry=True):
             raise GeoNodeException(msg)
 
 
-def get_coverage_grid_extent(instance):
-    """
-    Returns a list of integers with the size of the coverage
-    extent in pixels
-    """
-    instance_wcs = get_wcs_record(instance)
-    grid = instance_wcs.grid
-    return [(int(h) - int(l) + 1) for h, l in zip(grid.highlimits, grid.lowlimits)]
-
-
 GEOSERVER_LAYER_TYPES = {
     "vector": FeatureType.resource_type,
     "raster": Coverage.resource_type,
@@ -1546,7 +1531,6 @@ def get_store(cat, name, workspace=None):
 
 
 def fetch_gs_resource(instance, values, tries):
-    _max_tries = getattr(ogc_server_settings, "MAX_RETRIES", 2)
     try:
         gs_resource = gs_catalog.get_resource(name=instance.name, store=instance.store, workspace=instance.workspace)
     except Exception:
@@ -1587,9 +1571,6 @@ def fetch_gs_resource(instance, values, tries):
     else:
         msg = f"There isn't a geoserver resource for this layer: {instance.name}"
         logger.debug(msg)
-        if tries >= _max_tries:
-            # raise GeoNodeException(msg)
-            return (values, None)
         gs_resource = None
     return (values, gs_resource)
 
@@ -1650,7 +1631,7 @@ def _stylefilterparams_geowebcache_dataset(dataset_name):
 
     # check/write GWC filter parameters
     body = None
-    tree = dlxml.fromstring(_)
+    tree = dlxml.fromstring(content.encode())
     param_filters = tree.findall("parameterFilters")
     if param_filters and len(param_filters) > 0:
         if not param_filters[0].findall("styleParameterFilter"):
@@ -1827,40 +1808,6 @@ def set_time_info(layer, attribute, end_attribute, presentation, precision_value
         gs_catalog.save(resource)
 
 
-def get_time_info(layer):
-    """Get the configured time dimension metadata for the layer as a dict.
-
-    The keys of the dict will be those of the parameters of `set_time_info`.
-
-    :returns: dict of values or None if not configured
-    """
-    layer = gs_catalog.get_layer(layer.name)
-    if layer is None:
-        raise ValueError(f"no such layer: {layer.name}")
-    resource = layer.resource if layer else None
-    if not resource:
-        resources = gs_catalog.get_resources(stores=[layer.name])
-        if resources:
-            resource = resources[0]
-
-    info = resource.metadata.get("time", None) if resource.metadata else None
-    vals = None
-    if info:
-        value = step = None
-        resolution = info.resolution_str()
-        if resolution:
-            value, step = resolution.split()
-        vals = dict(
-            enabled=info.enabled,
-            attribute=info.attribute,
-            end_attribute=info.end_attribute,
-            presentation=info.presentation,
-            precision_value=value,
-            precision_step=step,
-        )
-    return vals
-
-
 ogc_server_settings = OGC_Servers_Handler(settings.OGC_SERVER)["default"]
 
 _wms = None
@@ -1904,85 +1851,6 @@ _esri_types = {
     "esriFieldTypeGlobalID": "xsd:string",
     "esriFieldTypeXML": "xsd:anyType",
 }
-
-
-def _dump_image_spec(request_body, image_spec):
-    millis = int(round(time.time() * 1000))
-    try:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            _request_body_file_name = os.path.join(tmp_dir, f"request_body_{millis}.dump")
-            _image_spec_file_name = os.path.join(tmp_dir, f"image_spec_{millis}.dump")
-            with open(_request_body_file_name, "w") as _request_body_file:
-                _request_body_file.write(f"{request_body}")
-            copyfile(_request_body_file_name, os.path.join(tempfile.gettempdir(), f"request_body_{millis}.dump"))
-            with open(_image_spec_file_name, "w") as _image_spec_file:
-                _image_spec_file.write(f"{image_spec}")
-            copyfile(_image_spec_file_name, os.path.join(tempfile.gettempdir(), f"image_spec_{millis}.dump"))
-        return f"Dumping image_spec to: {os.path.join(tempfile.gettempdir(), f'image_spec_{millis}.dump')}"
-    except Exception as e:
-        logger.exception(e)
-        return f"Unable to dump image_spec for request: {request_body}"
-
-
-def mosaic_delete_first_granule(cat, layer):
-    # - since GeoNode will uploade the first granule again through the Importer, we need to /
-    #   delete the one created by the gs_config
-    cat._cache.clear()
-    store = cat.get_store(layer)
-    coverages = cat.mosaic_coverages(store)
-
-    granule_id = f"{layer}.1"
-
-    cat.mosaic_delete_granule(coverages["coverages"]["coverage"][0]["name"], store, granule_id)
-
-
-def set_time_dimension(
-    cat,
-    name,
-    workspace,
-    time_presentation,
-    time_presentation_res,
-    time_presentation_default_value,
-    time_presentation_reference_value,
-):
-    # configure the layer time dimension as LIST
-    presentation = time_presentation
-    if not presentation:
-        presentation = "LIST"
-
-    resolution = None
-    if time_presentation == "DISCRETE_INTERVAL":
-        resolution = time_presentation_res
-
-    strategy = None
-    if time_presentation_default_value and not time_presentation_default_value == "":
-        strategy = time_presentation_default_value
-
-    timeInfo = DimensionInfo(
-        "time",
-        "true",
-        presentation,
-        resolution,
-        "ISO8601",
-        None,
-        attribute="time",
-        strategy=strategy,
-        reference_value=time_presentation_reference_value,
-    )
-
-    layer = cat.get_layer(name)
-    resource = layer.resource if layer else None
-    if not resource:
-        resources = cat.get_resources(stores=[name]) or cat.get_resources(stores=[name], workspaces=[workspace])
-        if resources:
-            resource = resources[0]
-
-    if not resource:
-        logger.exception(f"No resource could be found on GeoServer with name {name}")
-        raise Exception(f"No resource could be found on GeoServer with name {name}")
-
-    resource.metadata = {"time": timeInfo}
-    cat.save(resource)
 
 
 # main entry point to create a thumbnail - will use implementation
@@ -2032,40 +1900,10 @@ def sync_instance_with_geoserver(instance_id, *args, **kwargs):
 
         gs_resource = None
         if not _is_remote_instance:
-            values = None
+            values = {"title": instance.title, "abstract": instance.raw_abstract}
             _tries = 0
-            _max_tries = getattr(ogc_server_settings, "MAX_RETRIES", 3)
-
-            # If the store in None then it's a new instance from an upload,
-            # only in this case run the geoserver_upload method
-            if getattr(instance, "overwrite", False):
-                base_file, info = instance.get_base_file()
-
-                # There is no need to process it if there is no file.
-                if base_file:
-                    from geonode.geoserver.upload import geoserver_upload
-
-                    gs_name, workspace, values, gs_resource = geoserver_upload(
-                        instance,
-                        base_file.file.path,
-                        instance.owner,
-                        instance.name,
-                        overwrite=True,
-                        title=instance.title,
-                        abstract=instance.abstract,
-                        charset=instance.charset,
-                    )
 
             values, gs_resource = fetch_gs_resource(instance, values, _tries)
-            while not gs_resource and _tries < _max_tries:
-                values, gs_resource = fetch_gs_resource(instance, values, _tries)
-                _tries += 1
-                time.sleep(3)
-
-            # Get metadata links
-            metadata_links = []
-            for link in instance.link_set.metadata():
-                metadata_links.append((link.mime, link.name, link.url))
 
             if gs_resource:
                 logger.debug(f"Found geoserver resource for this dataset: {instance.name}")
@@ -2078,8 +1916,17 @@ def sync_instance_with_geoserver(instance_id, *args, **kwargs):
                     setattr(instance, key, get_dataset_storetype(values[key]))
 
                 if updatemetadata:
+                    # Get metadata links
+                    metadata_links = []
+                    for link in instance.link_set.metadata():
+                        metadata_links.append((link.mime, link.name, link.url))
                     gs_resource.metadata_links = metadata_links
-                    default_poc = instance.get_first_contact_of_role(role="poc")
+
+                    """
+                    TODO: Attributions must be set on a Layer, not a Resource.
+                    We should retrive gs_catalog.get_layer(name=instance.alternate), and obtain the resource from Layer.resource
+                    but I'm not sure if at this stage the layer is ready. For the moment I disable this block.
+                    default_poc = instance.get_first_contact_of_role(role="pointOfContact")
                     # Update Attribution link
                     if default_poc:
                         # gsconfig now utilizes an attribution dictionary
@@ -2096,7 +1943,7 @@ def sync_instance_with_geoserver(instance_id, *args, **kwargs):
                             settings.SITEURL.rstrip("/") if settings.SITEURL.startswith("http") else settings.SITEURL
                         )
                         gs_resource.attribution_link = site_url + profile.get_absolute_url()
-
+                    """
                     try:
                         if settings.RESOURCE_PUBLISHING:
                             if instance.is_published != gs_resource.advertised:
@@ -2226,36 +2073,6 @@ def select_relevant_files(allowed_extensions, files):
                 if not already_selected:
                     result.append(django_file)
     return result
-
-
-@dataclasses.dataclass()
-class SpatialFilesLayerType:
-    base_file: str
-    scan_hint: str
-    spatial_files: typing.List
-    dataset_type: typing.Optional[str] = None
-
-
-def get_spatial_files_dataset_type(allowed_extensions, files, charset="UTF-8") -> SpatialFilesLayerType:
-    """Reutnrs 'vector' or 'raster' whether a file from the allowed extensins has been identified."""
-    from geonode.upload.files import scan_file
-
-    allowed_file = select_relevant_files(allowed_extensions, files)
-    if not allowed_file or len(allowed_file) != 1:
-        return None
-    base_file = allowed_file[0]
-    spatial_files = scan_file(base_file, charset=charset)
-    the_dataset_type = get_dataset_type(spatial_files)
-    if the_dataset_type not in (FeatureType.resource_type, Coverage.resource_type):
-        return None
-    spatial_files_type = SpatialFilesLayerType(
-        base_file=base_file,
-        scan_hint=None,
-        spatial_files=spatial_files,
-        dataset_type="vector" if the_dataset_type == FeatureType.resource_type else "raster",
-    )
-
-    return spatial_files_type
 
 
 def get_dataset_type(spatial_files):

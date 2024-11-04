@@ -17,7 +17,6 @@
 #
 #########################################################################
 import re
-import os
 import json
 import decimal
 import logging
@@ -58,7 +57,7 @@ from geonode.services.models import Service
 from geonode.base import register_event
 from geonode.monitoring.models import EventType
 from geonode.groups.models import GroupProfile
-from geonode.security.utils import get_user_visible_groups, AdvancedSecurityWorkflowManager
+from geonode.security.utils import get_user_visible_groups
 from geonode.people.forms import ProfileForm
 from geonode.utils import check_ogc_backend, llbbox_to_mercator, resolve_object
 from geonode.geoserver.helpers import ogc_server_settings
@@ -70,13 +69,6 @@ CONTEXT_LOG_FILE = ogc_server_settings.LOG_FILE
 
 logger = logging.getLogger("geonode.layers.views")
 
-DEFAULT_SEARCH_BATCH_SIZE = 10
-MAX_SEARCH_BATCH_SIZE = 25
-GENERIC_UPLOAD_ERROR = _(
-    "There was an error while attempting to upload your data. \
-Please try again, or contact and administrator if the problem continues."
-)
-
 METADATA_UPLOADED_PRESERVE_ERROR = _(
     "Note: this dataset's orginal metadata was \
 populated and preserved by importing a metadata XML file. This metadata cannot be edited."
@@ -87,17 +79,6 @@ _PERMISSION_MSG_GENERIC = _("You do not have permissions for this dataset.")
 _PERMISSION_MSG_MODIFY = _("You are not permitted to modify this dataset")
 _PERMISSION_MSG_METADATA = _("You are not permitted to modify this dataset's metadata")
 _PERMISSION_MSG_VIEW = _("You are not permitted to view this dataset")
-
-
-def log_snippet(log_file):
-    if not log_file or not os.path.isfile(log_file):
-        return f"No log file at {log_file}"
-
-    with open(log_file) as f:
-        f.seek(0, 2)  # Seek @ EOF
-        fsize = f.tell()  # Get Size
-        f.seek(max(fsize - 10024, 0), 0)  # Set pos @ last n chars
-        return f.read()
 
 
 def _resolve_dataset(request, alternate, permission="base.view_resourcebase", msg=_PERMISSION_MSG_GENERIC, **kwargs):
@@ -449,12 +430,6 @@ def dataset_metadata(
             layer.regions.add(*new_regions)
         layer.category = new_category
 
-        from geonode.upload.models import Upload
-
-        up_sessions = Upload.objects.filter(resource_id=layer.resourcebase_ptr_id)
-        if up_sessions.exists() and up_sessions[0].user != layer.owner:
-            up_sessions.update(user=layer.owner)
-
         dataset_form.save_linked_resources()
 
         register_event(request, EventType.EVENT_CHANGE_METADATA, layer)
@@ -521,9 +496,9 @@ def dataset_metadata(
 
         return HttpResponse(json.dumps({"message": message}))
 
-    if not AdvancedSecurityWorkflowManager.is_allowed_to_publish(request.user, layer):
+    if not request.user.can_publish(layer):
         dataset_form.fields["is_published"].widget.attrs.update({"disabled": "true"})
-    if not AdvancedSecurityWorkflowManager.is_allowed_to_approve(request.user, layer):
+    if not request.user.can_approve(layer):
         dataset_form.fields["is_approved"].widget.attrs.update({"disabled": "true"})
 
     # define contact role forms
@@ -671,7 +646,7 @@ def dataset_metadata_detail(request, layername, template="datasets/dataset_metad
     site_url = settings.SITEURL.rstrip("/") if settings.SITEURL.startswith("http") else settings.SITEURL
 
     register_event(request, "view_metadata", layer)
-    perms_list = list(layer.get_self_resource().get_user_perms(request.user).union(layer.get_user_perms(request.user)))
+    perms_list = layer.get_user_perms(request.user)
 
     return render(
         request,
