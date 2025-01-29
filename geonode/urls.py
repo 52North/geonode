@@ -43,7 +43,7 @@ from geonode import geoserver
 from geonode.utils import check_ogc_backend
 from geonode.base import register_url_event
 from geonode.messaging.urls import urlpatterns as msg_urls
-from .people.views import CustomSignupView
+from .people.views import CustomSignupView, CustomLoginView
 from oauth2_provider.urls import app_name as oauth2_app_name, base_urlpatterns, oidc_urlpatterns
 
 admin.autodiscover()
@@ -93,6 +93,7 @@ urlpatterns += [
     re_path(r"^h_keywords_api$", views.h_keywords, name="h_keywords_api"),
     # Social views
     re_path(r"^account/signup/", CustomSignupView.as_view(), name="account_signup"),
+    re_path(r"^account/login/", CustomLoginView.as_view(), name="account_login"),
     re_path(r"^account/", include("allauth.urls")),
     re_path(r"^invitations/", include("geonode.invitations.urls", namespace="geonode.invitations")),
     re_path(r"^people/", include("geonode.people.urls")),
@@ -135,6 +136,8 @@ urlpatterns += [
     re_path(r"^api/v2/api-auth/", include("rest_framework.urls", namespace="geonode_rest_framework")),
     re_path(r"^api/v2/", include("geonode.facets.urls")),
     re_path(r"^api/v2/", include("geonode.assets.urls")),
+    # metadata views
+    re_path(r"^api/v2/", include("geonode.metadata.urls")),
     re_path(r"", include(api.urls)),
     re_path(
         r"uploads/upload",

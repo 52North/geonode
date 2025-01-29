@@ -408,6 +408,7 @@ GEONODE_CORE_APPS = (
     "geonode.catalogue",
     "geonode.catalogue.metadataxsl",
     "geonode.harvesting",
+    "geonode.metadata",
 )
 
 # GeoNode Apps
@@ -1359,7 +1360,6 @@ except ValueError:
     AVATAR_PROVIDERS = (
         (
             "avatar.providers.PrimaryAvatarProvider",
-            "avatar.providers.GravatarAvatarProvider",
             "avatar.providers.DefaultAvatarProvider",
         )
         if os.getenv("AVATAR_PROVIDERS") is None
@@ -1398,8 +1398,11 @@ if RECAPTCHA_ENABLED:
     if "django_recaptcha" not in INSTALLED_APPS:
         INSTALLED_APPS += ("django_recaptcha",)
     ACCOUNT_SIGNUP_FORM_CLASS = os.getenv(
-        "ACCOUNT_SIGNUP_FORM_CLASS", "geonode.people.forms.AllauthReCaptchaSignupForm"
+        "ACCOUNT_SIGNUP_FORM_CLASS", "geonode.people.forms.recaptcha.AllauthReCaptchaSignupForm"
     )
+
+    # https://docs.allauth.org/en/dev/account/configuration.html
+    ACCOUNT_FORMS = dict(login="geonode.people.forms.recaptcha.AllauthRecaptchaLoginForm")
     """
      In order to generate reCaptcha keys, please see:
       - https://pypi.org/project/django-recaptcha/#installation
@@ -2172,8 +2175,8 @@ MANAGEMENT_COMMANDS_EXPOSED_OVER_HTTP = set(
 
 FILE_UPLOAD_HANDLERS = [
     "geonode.upload.uploadhandler.SizeRestrictedFileUploadHandler",
-    "django.core.files.uploadhandler.MemoryFileUploadHandler",
     "django.core.files.uploadhandler.TemporaryFileUploadHandler",
+    "django.core.files.uploadhandler.MemoryFileUploadHandler",
 ]
 
 DEFAULT_MAX_UPLOAD_SIZE = int(os.getenv("DEFAULT_MAX_UPLOAD_SIZE", 104857600))  # 100 MB
@@ -2327,3 +2330,8 @@ ASSET_HANDLERS = [
 ]
 INSTALLED_APPS += ("geonode.assets",)
 GEONODE_APPS += ("geonode.assets",)
+
+# Django-Avatar - Change default templates to Geonode based
+AVATAR_ADD_TEMPLATE = "people/avatar/add.html"
+AVATAR_CHANGE_TEMPLATE = "people/avatar/change.html"
+AVATAR_DELETE_TEMPLATE = "people/avatar/confirm_delete.html"
